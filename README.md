@@ -1,0 +1,43 @@
+# Cisco AnyConnect SOCKS Proxy
+
+Connect to a Cisco AnyConnect VPN via **OpenConnect** and expose a **SOCKS5** proxy.
+All traffic routed through the proxy goes over the VPN tunnel.
+
+Runs inside a single Docker container:
+
+- **OpenConnect** -- connects to the VPN
+- **Dante** -- SOCKS5 server on port 1080
+- **tun2socks** -- optional TUN device (`tun1` 198.18.0.1/15) for transparent proxying
+
+## Quick start
+
+1. Create `env/cisco/.env`:
+
+```
+ANYCONNECT_SERVER=vpn.example.com
+ANYCONNECT_USER=your_username
+ANYCONNECT_PASSWORD=your_password
+ANYCONNECT_SERVERCERT=sha256:xxxx   # optional, skip cert prompt
+```
+
+2. Start and test:
+
+```bash
+docker compose up -d --build
+
+# VPN takes ~30-60s. Then:
+curl -x socks5h://127.0.0.1:1080 https://ifconfig.io
+
+# Or use the helper script (retries up to ~150s):
+./scripts/check-socks.sh
+```
+
+## Custom port
+
+```bash
+CISCO_SOCKS_PORT=8080 docker compose -f docker-compose.yml -f docker/docker-compose.publish.yml up -d
+```
+
+## License
+
+MIT
