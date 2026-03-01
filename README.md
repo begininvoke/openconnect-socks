@@ -107,6 +107,16 @@ CISCO_SOCKS_PORT=8080 docker compose -f docker-compose.yml -f docker/docker-comp
 
 Then use `127.0.0.1:8080` as the SOCKS proxy.
 
+### Reconnect VPN periodically (e.g. every 2 hours)
+
+Some VPNs drop the session after a while. To force a reconnect on a schedule, set:
+
+```env
+VPN_RECONNECT_SECONDS=7200
+```
+
+`7200` = 2 hours. The container will disconnect, then reconnect to the VPN (and restart Dante/tun2socks) every 2 hours. Set to `0` or omit to never reconnect (default).
+
 ### Env reference
 
 | Variable | Required | Description |
@@ -115,6 +125,7 @@ Then use `127.0.0.1:8080` as the SOCKS proxy.
 | `ANYCONNECT_USER`   | Yes | VPN username |
 | `ANYCONNECT_PASSWORD` | Yes | VPN password |
 | `ANYCONNECT_SERVERCERT` | No | Server cert fingerprint (`sha256:...`) to avoid interactive cert prompt |
+| `VPN_RECONNECT_SECONDS` | No | Reconnect VPN every N seconds (e.g. `7200` = 2h). `0` = never (default) |
 
 ---
 
