@@ -23,6 +23,30 @@ Use it to route apps (browsers, CLI, IDE) through your corporate or campus VPN w
 
 ---
 
+## Building for AMD64 (e.g. Linux server or Intel/AMD host)
+
+On an ARM machine (e.g. M1/M2 Mac) you can build and run the image for **linux/amd64**:
+
+**One-off build and run:**
+
+```bash
+DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose up -d --build
+```
+
+**Or build the image only:**
+
+```bash
+docker build --platform linux/amd64 -t vpn-socks ./docker/image/vpn-socks
+```
+
+To always build for AMD64, set in `docker-compose.yml` under the `vpn-socks` service:
+
+```yaml
+platform: linux/amd64
+```
+
+---
+
 ## Quick start
 
 ### 1. Create the env file
