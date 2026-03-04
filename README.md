@@ -107,16 +107,6 @@ CISCO_SOCKS_PORT=8080 docker compose -f docker-compose.yml -f docker/docker-comp
 
 Then use `127.0.0.1:8080` as the SOCKS proxy.
 
-### Reconnect VPN periodically (e.g. every 2 hours)
-
-Some VPNs drop the session after a while. To force a reconnect on a schedule, set:
-
-```env
-VPN_RECONNECT_SECONDS=7200
-```
-
-`7200` = 2 hours. The container will disconnect, then reconnect to the VPN (and restart Dante/tun2socks) every 2 hours. Set to `0` or omit to never reconnect (default).
-
 ### Env reference
 
 | Variable | Required | Description |
@@ -125,54 +115,6 @@ VPN_RECONNECT_SECONDS=7200
 | `ANYCONNECT_USER`   | Yes | VPN username |
 | `ANYCONNECT_PASSWORD` | Yes | VPN password |
 | `ANYCONNECT_SERVERCERT` | No | Server cert fingerprint (`sha256:...`) to avoid interactive cert prompt |
-| `VPN_RECONNECT_SECONDS` | No | Reconnect VPN every N seconds (e.g. `7200` = 2h). `0` = never (default) |
-
-### Edit entrypoint without rebuilding
-
-`docker-compose.yml` mounts `docker/image/vpn-socks/entrypoint.sh` into the container. Edit that file on your host; then restart the container so it uses the new script:
-
-```bash
-docker compose restart vpn-socks
-```
-
-The mounted script must be executable on the host (`chmod +x docker/image/vpn-socks/entrypoint.sh`). No image rebuild needed.
-
----
-
-## Build for Linux AMD64 and run offline (e.g. copy via SSH)
-
-Use this when the target machine is Linux x86_64 and has no registry access (offline or air-gapped).
-
-**1. On your build machine** (from the repo root):
-
-- Build the image for `linux/amd64`:
-  ```bash
-  docker build --platform linux/amd64 -t vpn-socks:latest -f docker/image/vpn-socks/Dockerfile docker/image/vpn-socks
-  ```
-- Save the image to a tarball:
-  ```bash
-  docker save vpn-socks:latest -o vpn-socks.tar
-  ```
-  (Optional: compress with `gzip vpn-socks.tar` → `vpn-socks.tar.gz` for smaller transfer.)
-
-**2. Copy to the remote Linux server** (e.g. via SSH/SCP):
-
-- Example:
-  ```bash
-  scp vpn-socks.tar user@remote-host:/path/to/project/
-  ```
-
-**3. On the remote server** (where you run the stack):
-
-- Load the image (no internet needed):
-  ```bash
-  docker load -i vpn-socks.tar
-  ```
-- Put the rest of the project on the server: `docker-compose.yml`, `env/cisco/.env`, and (if you use the entrypoint volume) `docker/image/vpn-socks/entrypoint.sh`.
-- On the remote, Compose must use the loaded image instead of building. Edit `docker-compose.yml` there: comment out (or remove) the `build:` block and add `image: vpn-socks:latest` under the `vpn-socks:` service. Then start:
-  ```bash
-  docker compose up -d
-  ```
 
 ---
 
