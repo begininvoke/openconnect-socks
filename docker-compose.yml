@@ -1,10 +1,12 @@
 services:
   vpn-socks:
-    build:
-      context: docker/image/vpn-socks
+    image: vpn-socks:latest
     env_file:
       - ./env/cisco/.env
     ports:
       - "127.0.0.1:1080:1080"
     privileged: true
     restart: unless-stopped
+    volumes:
+      # Mount entrypoint so you can edit locally without rebuilding
+      - ./docker/image/vpn-socks/entrypoint.sh:/entrypoint.sh

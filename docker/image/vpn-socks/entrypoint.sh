@@ -16,6 +16,8 @@ VPN_INTERFACE="tun0"
 TUN2SOCKS_INTERFACE="tun1"
 TUN2SOCKS_SUBNET="198.18.0.1/15"
 MAX_WAIT_ITERATIONS=75            # 75 x 2s = 150s max wait for tunnel
+# Reconnect VPN every N seconds (0 = never). e.g. 7200 = every 2 hours
+RECONNECT_SECONDS="${VPN_RECONNECT_SECONDS:-0}"
 
 # Save original gateway BEFORE OpenConnect touches the routing table
 ORIG_GW=$(ip route 2>/dev/null  | awk '/default via/ {print $3; exit}')
@@ -28,8 +30,9 @@ die()  { log "FATAL: $*"; exit 1; }
 # ── Build OpenConnect credentials ─────────────────────────────────────────
 build_credentials() {
   local creds="$1"
+  : > "$creds"
   # When no server-cert is given we need to answer "yes" to the cert prompt
-  [ -z "$ANYCONNECT_SERVERCERT" ] && printf 'yes\n' > "$creds"
+  [ -z "$ANYCONNECT_SERVERCERT" ] && printf 'yes\n' >> "$creds"
 
   # Send multiple username+password pairs to handle server retries (E=907/E=908)
   local i=0
@@ -152,6 +155,13 @@ cleanup() {
   exit 0
 }
 
+# ── Stop VPN and proxy (for reconnects) ────────────────────────────────────
+stop_vpn_and_services() {
+  log "Stopping OpenConnect, Dante, tun2socks..."
+  kill $OC_PID $SOCKD_PID $TUN2_PID 2>/dev/null || true
+  wait $OC_PID 2>/dev/null || true
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Main
 # ═══════════════════════════════════════════════════════════════════════════
@@ -161,45 +171,65 @@ OC_LOG=$(mktemp)
 trap cleanup TERM INT
 trap 'rm -f "$CREDS" "$OC_LOG"' EXIT
 
-# 1. Build credentials file
-build_credentials "$CREDS"
+SOCKD_PID=""
+TUN2_PID=""
+FIRST_RUN=1
 
-# 2. Prepare tun device
-ip tuntap add mode tun dev "$VPN_INTERFACE" 2>/dev/null || true
+while true; do
+  : > "$OC_LOG"
+  # 1. Build credentials file
+  build_credentials "$CREDS"
 
-# 3. Build and launch OpenConnect
-OC_ARGS="--timestamp --user=$ANYCONNECT_USER --script=/vpnc-script.sh --http-auth=basic --interface=$VPN_INTERFACE"
-[ -n "$ANYCONNECT_SERVERCERT" ] && OC_ARGS="$OC_ARGS --servercert=$ANYCONNECT_SERVERCERT"
+  # 2. Prepare tun device
+  ip tuntap add mode tun dev "$VPN_INTERFACE" 2>/dev/null || true
 
-log "Connecting to $ANYCONNECT_SERVER..."
-openconnect "$ANYCONNECT_SERVER" $OC_ARGS < "$CREDS" 2>&1 \
-  | while IFS= read -r line; do echo "$line"; echo "$line" >> "$OC_LOG"; done &
-OC_PID=$!
+  # 3. Build and launch OpenConnect
+  OC_ARGS="--timestamp --user=$ANYCONNECT_USER --script=/vpnc-script.sh --http-auth=basic --interface=$VPN_INTERFACE"
+  [ -n "$ANYCONNECT_SERVERCERT" ] && OC_ARGS="$OC_ARGS --servercert=$ANYCONNECT_SERVERCERT"
 
-# 4. Wait for tunnel
-TUN_IP=""
-if wait_for_tunnel; then
-  log "VPN connected ($TUN_IP)"
-  set_vpn_default_route || true
-else
-  # Fallback: start SOCKS on primary interface (VPN may connect later)
-  TUN_IP=$(ip -4 -o addr show 2>/dev/null \
-           | awk '$2 !~ /^lo$/ { gsub(/\/.*/,"",$4); print $4; exit }')
-  [ -z "$TUN_IP" ] && die "No tunnel and no usable interface IP"
-  log "Tunnel not detected yet; starting SOCKS on $TUN_IP (VPN may connect in background)"
-fi
+  log "Connecting to $ANYCONNECT_SERVER..."
+  openconnect "$ANYCONNECT_SERVER" $OC_ARGS < "$CREDS" 2>&1 \
+    | while IFS= read -r line; do echo "$line"; echo "$line" >> "$OC_LOG"; done &
+  OC_PID=$!
 
-# 5. Start SOCKS5 proxy
-start_dante
+  # 4. Wait for tunnel
+  TUN_IP=""
+  if wait_for_tunnel; then
+    log "VPN connected ($TUN_IP)"
+    set_vpn_default_route || true
+  else
+    # Fallback: start SOCKS on primary interface (VPN may connect later)
+    TUN_IP=$(ip -4 -o addr show 2>/dev/null \
+             | awk '$2 !~ /^lo$/ { gsub(/\/.*/,"",$4); print $4; exit }')
+    [ -z "$TUN_IP" ] && die "No tunnel and no usable interface IP"
+    log "Tunnel not detected yet; starting SOCKS on $TUN_IP (VPN may connect in background)"
+  fi
 
-# 6. Start tun2socks
-start_tun2socks
+  # 5. Start SOCKS5 proxy (kill previous if reconnecting)
+  kill $SOCKD_PID 2>/dev/null || true
+  start_dante
 
-# Debug: show final routing table
-log "Routing table:"
-ip route 2>/dev/null | sed 's/^/  /' >&2
-log "Interfaces:"
-ip -4 -o addr show 2>/dev/null | sed 's/^/  /' >&2
+  # 6. Start tun2socks (kill previous if reconnecting)
+  kill $TUN2_PID 2>/dev/null || true
+  start_tun2socks
 
-log "Ready. SOCKS5 on :$SOCKS_PORT | tun2socks on $TUN2SOCKS_INTERFACE"
-wait
+  # Debug: show routing table on first run only
+  if [ "$FIRST_RUN" = 1 ]; then
+    FIRST_RUN=0
+    log "Routing table:"
+    ip route 2>/dev/null | sed 's/^/  /' >&2
+    log "Interfaces:"
+    ip -4 -o addr show 2>/dev/null | sed 's/^/  /' >&2
+  fi
+
+  log "Ready. SOCKS5 on :$SOCKS_PORT | tun2socks on $TUN2SOCKS_INTERFACE"
+
+  if [ "$RECONNECT_SECONDS" -le 0 ]; then
+    wait
+    exit 0
+  fi
+
+  log "Reconnecting VPN in $RECONNECT_SECONDS seconds ($(($RECONNECT_SECONDS / 3600))h)..."
+  sleep $RECONNECT_SECONDS
+  stop_vpn_and_services
+done
