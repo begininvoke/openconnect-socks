@@ -1,7 +1,6 @@
 services:
   vpn-socks:
-    build:
-      context: docker/image/vpn-socks
+    image: vpn-socks:latest
     env_file:
       - ./env/cisco/.env
     ports:

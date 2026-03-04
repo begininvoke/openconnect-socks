@@ -135,7 +135,7 @@ VPN_RECONNECT_SECONDS=7200
 docker compose restart vpn-socks
 ```
 
-No image rebuild needed.
+The mounted script must be executable on the host (`chmod +x docker/image/vpn-socks/entrypoint.sh`). No image rebuild needed.
 
 ---
 
